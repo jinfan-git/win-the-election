@@ -274,7 +274,7 @@
         <div class="metric"><div class="label">Your EV</div><div class="value" id="scoreText">0</div></div>
         <div class="metric"><div class="label">PC EV</div><div class="value" id="pcScoreText">0</div></div>
         <div class="metric"><div class="label">Claimed</div><div class="value" id="countText">0</div></div>
-        <div class="metric"><div class="label" id="timeLabel">Time</div><div class="value timer" id="timerText">02:00</div></div>
+        <div class="metric"><div class="label" id="timeLabel">Time</div><div class="value timer" id="timerText">03:00</div></div>
       </div>
 
       <div class="controls">
@@ -392,7 +392,7 @@
   const PROGRESS_MAX = 538;
   const WIN_THRESHOLD = 270;
 
-  const NORMAL_TIME_SEC = 120;
+  const NORMAL_TIME_SEC = 180;
 
   const COMP_ROUNDS = 17;
   const COMP_ROUND_SEC = 20;
@@ -488,7 +488,7 @@
   function renderModeChoices(){
     modeChoicesEl.innerHTML = "";
     const modes = [
-      { key:"normal", title:"Normal Mode", desc:"Free typing. Claim any unclaimed state at any time. 2:00 total." },
+      { key:"normal", title:"Normal Mode", desc:"Free typing. Claim any unclaimed state at any time. 3 minutes total." },
       { key:"competitive", title:"Competitive Mode", desc:"17 rounds. Each round compete for 3 states in 20 seconds." }
     ];
     modes.forEach((m) => {
