@@ -918,7 +918,7 @@
 
     if (!abbr) {
       if (handleEasterEgg(n)) { inputEl.value=""; return; }
-      if (looksLikeTypo(n)) setMessage("❌ Not recognized — possible typo. (No auto-correction enabled.)", "bad");
+      if (looksLikeTypo(n)) setMessage("❌ Not recognized — possible typo.", "bad");
       else setMessage("❌ Not recognized. Type a full state name.", "bad");
       return;
     }
