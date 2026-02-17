@@ -226,13 +226,13 @@
   <!-- SETUP MODAL -->
   <div class="modalOverlay" id="startOverlay">
     <div class="modal">
-      <h2>Electoral Vote Typing Game</h2>
-      <p>Type <b>full state names</b> to win electoral votes. Choose a mode and a party color.</p>
+      <h2>Win the Election</h2>
+      <p>Type <b>full state names</b> to collect their electoral votes. After register your name and your party with me, choose a mode and your party color.</p>
 
       <div class="row">
         <div class="field">
-          <label for="fullName">Your full name</label>
-          <input id="fullName" type="text" placeholder="Type your full name" />
+          <label for="fullName">Your name</label>
+          <input id="fullName" type="text" placeholder="Type your name" />
         </div>
         <div class="field">
           <label for="partyName">Party name</label>
@@ -245,7 +245,7 @@
           <label>Game mode</label>
           <div class="modeGroup" id="modeChoices"></div>
           <div class="tiny">
-            Competitive mode has <b>17 rounds</b>, each round locks <b>3 states</b> for <b>20 seconds</b>.
+            Competitive mode is <b>more challenging!</b> Try normal mode first to build your confidence in geography.
           </div>
         </div>
       </div>
@@ -287,7 +287,7 @@
       <div class="progressWrap">
         <div class="progressTop">
           <div class="title">Progress</div>
-          <div style="color:var(--muted); font-size:13px;">0 → 540</div>
+          <div style="color:var(--muted); font-size:13px;">0 → 538</div>
         </div>
         <div class="bar">
           <div class="tickLabel" aria-hidden="true">270</div>
@@ -389,7 +389,7 @@
   const NON_US = new Set(["canada","greenland","venezuela","panama"]);
 
   // ------------------ Settings ------------------
-  const PROGRESS_MAX = 540;
+  const PROGRESS_MAX = 538;
   const WIN_THRESHOLD = 270;
 
   const NORMAL_TIME_SEC = 120;
@@ -611,13 +611,13 @@
         winShown = true;
         winBanner.style.display = "block";
         winText.innerHTML = `🏆 <span class="pill">270+ reached</span> Congratulations!`;
-        winSub.textContent = `Congratulations — ${yourParty} candidate ${yourName} is elected President of the United States. (You can keep playing.)`;
+        winSub.textContent = `Congratulations — ${yourParty} candidate ${yourName} is elected President of the United States.`;
       }
       if (mode === "competitive" && pcEV >= WIN_THRESHOLD && !loseShown) {
         loseShown = true;
         winBanner.style.display = "block";
-        winText.innerHTML = `💥 <span class="pill">PC reached 270</span> You lose.`;
-        winSub.textContent = `The PC reached 270 electoral votes first. Try again with a faster strategy.`;
+        winText.innerHTML = `💥 <span class="pill">Opposition Party reached 270</span> You lose.`;
+        winSub.textContent = `The Opposition Party reached 270 electoral votes first. Try again with a faster strategy.`;
         endGame("lose");
         return;
       }
