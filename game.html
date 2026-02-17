@@ -1,0 +1,1079 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Electoral Vote Typing Game</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+
+  <style>
+    :root{
+      --bg:#f6f7fb; --card:#ffffff; --text:#111827; --muted:#6b7280;
+      --danger:#dc2626; --ok:#16a34a;
+      --partyColor:#2563eb;     /* player */
+      --pcColor:#f97316;        /* PC default orange (unless player picks orange -> purple) */
+      --barBg:#e5e7eb;
+    }
+    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:var(--text); }
+    .wrap{ max-width:1100px; margin:0 auto; padding:18px; }
+    .card{ background:var(--card); border-radius:16px; padding:16px; box-shadow:0 8px 24px rgba(0,0,0,.06); }
+    .hud{ display:flex; gap:16px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
+    .metric{ display:flex; gap:10px; align-items:baseline; }
+    .metric .label{ color:var(--muted); font-size:14px; }
+    .metric .value{ font-weight:950; font-size:22px; }
+    .timer{ color:var(--danger); }
+    .controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+    input[type="text"]{
+      padding:12px 12px; font-size:16px; border-radius:12px; border:1px solid #d1d5db; outline:none; width:360px;
+    }
+    input[type="text"]:focus{ border-color:var(--partyColor); box-shadow:0 0 0 4px rgba(37,99,235,.15); }
+    button{
+      padding:12px 14px; font-size:15px; border-radius:12px; border:1px solid #d1d5db; background:#fff; cursor:pointer;
+      -webkit-tap-highlight-color: transparent;
+      font-weight:900;
+    }
+    button.primary{ background:var(--partyColor); color:#fff; border-color:var(--partyColor); }
+    button.secondary{ background:#111827; color:#fff; border-color:#111827; }
+    button:disabled{ opacity:.5; cursor:not-allowed; }
+    .msg{ margin-top:10px; min-height:22px; font-weight:850; }
+    .msg.ok{ color:var(--ok); }
+    .msg.bad{ color:var(--danger); }
+    .msg.info{ color:var(--muted); }
+
+    .layout{ display:grid; grid-template-columns:1.5fr .9fr; gap:16px; margin-top:16px; }
+    @media (max-width:900px){ .layout{ grid-template-columns:1fr; } }
+    .mapCard{ padding:10px; }
+    #map{ width:100%; height:auto; display:block; }
+
+    .legend{ display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; color:var(--muted); font-size:13px; }
+    .chip{ display:inline-flex; align-items:center; gap:8px; }
+    .dot{ width:12px; height:12px; border-radius:4px; display:inline-block; border:1px solid rgba(0,0,0,.15); }
+    .dot.un{ background:#e5e7eb; }
+    .dot.hit{ background:var(--partyColor); }
+    .dot.pc{ background:var(--pcColor); }
+    .dot.out{ background:#9ca3af; }
+
+    /* Map styling */
+    .state{ fill:#e5e7eb; stroke:#ffffff; stroke-width:.7; }
+    .state.player{ fill:var(--partyColor); }
+    .state.pc{ fill:var(--pcColor); }
+    .state.locked{
+      stroke:var(--pcColor);
+      stroke-width:3.0;
+      filter: drop-shadow(0 1px 1px rgba(0,0,0,.14));
+    }
+    .state.missed{ fill:#9ca3af; }
+
+    .tooltip{
+      position:fixed; pointer-events:none; background:rgba(17,24,39,.95); color:#fff;
+      padding:8px 10px; border-radius:10px; font-size:13px; transform:translate(10px,10px);
+      opacity:0; transition:opacity .08s ease; max-width:260px; z-index: 20;
+    }
+
+    /* Progress bar with center tick */
+    .progressWrap{ margin-top:12px; }
+    .progressTop{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
+    .progressTop .title{ font-weight:950; }
+    .bar{
+      height:14px; background:var(--barBg); border-radius:999px; overflow:hidden;
+      border:1px solid rgba(0,0,0,.06); margin-top:8px; position:relative;
+    }
+    .fillPlayer{
+      height:100%; width:0%;
+      background:var(--partyColor);
+      border-radius:999px;
+      transition:width .15s ease;
+      position:relative; z-index:1;
+    }
+    .fillPC{
+      height:100%; width:0%;
+      background:var(--pcColor);
+      position:absolute; right:0; top:0;
+      border-radius:999px;
+      transition:width .15s ease;
+      opacity:0.95;
+      z-index:1;
+    }
+    .tick{
+      position:absolute; top:-6px; height:26px; width:2px;
+      background: rgba(17,24,39,.55);
+      left:50%;
+      transform: translateX(-1px);
+      z-index:2;
+      border-radius:2px;
+    }
+    .tickLabel{
+      position:absolute; top:-22px; left:50%;
+      transform: translateX(-50%);
+      font-size:11px; font-weight:900; color: rgba(17,24,39,.7);
+      background: rgba(255,255,255,.75);
+      padding:2px 6px; border-radius:999px;
+      border: 1px solid rgba(0,0,0,.06);
+      z-index:3;
+      user-select:none;
+    }
+
+    .winBanner{
+      display:none;
+      margin-top:12px;
+      padding:14px 16px;
+      border-radius:16px;
+      background: rgba(0,0,0,.88);
+      color:#fff;
+      font-weight:950;
+      font-size:18px;
+      line-height:1.25;
+    }
+    .winBanner .sub{ opacity:.9; font-weight:850; margin-top:6px; font-size:14px; }
+    .winBanner .pill{
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 10px; border-radius:999px;
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.22);
+      margin-left: 8px;
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    /* Modal */
+    .modalOverlay{
+      position:fixed; inset:0; background:rgba(17,24,39,.55);
+      display:flex; align-items:center; justify-content:center; padding:18px;
+      z-index: 50;
+      pointer-events: auto;
+    }
+    .modal{
+      width:min(620px, 100%); background:#fff; border-radius:18px; padding:18px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.25);
+    }
+    .modal h2{ margin:0 0 8px 0; font-size:20px; font-weight:950; }
+    .modal p{ margin:0 0 14px 0; color:var(--muted); line-height:1.35; }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+    .row label{ font-size:13px; color:var(--muted); font-weight:900; display:block; margin-bottom:6px; }
+    .field{ flex:1; min-width: 220px; }
+    .field input{
+      width:100%; padding:12px 12px; font-size:15px; border-radius:12px; border:1px solid #d1d5db; outline:none;
+    }
+    .colors{ display:flex; gap:10px; flex-wrap:wrap; }
+    .colorBtn{
+      display:inline-flex; align-items:center; gap:10px;
+      padding:10px 12px; border-radius:12px; border:1px solid #d1d5db;
+      cursor:pointer; user-select:none; background:#fff; font-weight:950;
+    }
+    .swatch{ width:16px; height:16px; border-radius:6px; border:1px solid rgba(0,0,0,.15); }
+    .colorBtn.selected{ border-color:#111827; box-shadow:0 0 0 4px rgba(17,24,39,.08); }
+
+    .modeGroup{ display:flex; gap:10px; flex-wrap:wrap; }
+    .modeBtn{
+      flex:1; min-width: 220px;
+      padding:12px 12px;
+      border-radius:14px;
+      border:1px solid #d1d5db;
+      background:#fff;
+      cursor:pointer;
+      text-align:left;
+    }
+    .modeBtn.selected{ border-color:#111827; box-shadow:0 0 0 4px rgba(17,24,39,.08); }
+    .modeBtn .t{ font-weight:950; }
+    .modeBtn .d{ color:var(--muted); font-size:12px; line-height:1.25; margin-top:4px; }
+
+    .modalActions{ display:flex; justify-content:flex-end; gap:10px; margin-top:14px; }
+    .tiny{ font-size:12px; color:var(--muted); margin-top:10px; line-height:1.35; }
+
+    .chips{ margin-top:10px; display:flex; flex-wrap:wrap; gap:8px; }
+    .chipState{
+      display:inline-flex; align-items:center; gap:6px;
+      background:#f3f4f6; border:1px solid #e5e7eb; color:#111827;
+      padding:6px 10px; border-radius:999px; font-size:13px; font-weight:950;
+    }
+    .chipState.pc{ border-color: rgba(249,115,22,.45); }
+
+    .lockPanel{
+      margin-top:10px;
+      padding:12px;
+      border-radius:14px;
+      border:1px solid #e5e7eb;
+      background:#fafafa;
+    }
+    .lockPanel .title{
+      display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;
+      font-weight:950;
+    }
+    .lockPanel .subtitle{ color:var(--muted); font-size:12px; margin-top:4px; line-height:1.3; }
+    .lockedList{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    /* Locked chips: start as white with PC border; after player answers -> filled with player color & white text */
+    .lockedChip{
+      display:inline-flex; align-items:center; justify-content:center;
+      padding:10px 12px; border-radius:14px;
+      border:2px solid rgba(0,0,0,.10);
+      background:#fff;
+      font-weight:950; font-size:13px;
+      min-width: 92px;
+      user-select:none;
+    }
+    .lockedChip.pc{ border-color: rgba(249,115,22,.65); color:#111827; }
+    .lockedChip.revealed{
+      background: var(--partyColor);
+      border-color: var(--partyColor);
+      color:#ffffff;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- SETUP MODAL -->
+  <div class="modalOverlay" id="startOverlay">
+    <div class="modal">
+      <h2>Electoral Vote Typing Game</h2>
+      <p>Type <b>full state names</b> to win electoral votes. Choose a mode and a party color.</p>
+
+      <div class="row">
+        <div class="field">
+          <label for="fullName">Your full name</label>
+          <input id="fullName" type="text" placeholder="Type your full name" />
+        </div>
+        <div class="field">
+          <label for="partyName">Party name</label>
+          <input id="partyName" type="text" placeholder="Type your party name" />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <div style="flex:1;">
+          <label>Game mode</label>
+          <div class="modeGroup" id="modeChoices"></div>
+          <div class="tiny">
+            Competitive mode has <b>17 rounds</b>, each round locks <b>3 states</b> for <b>20 seconds</b>.
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <div style="flex:1;">
+          <label>Choose party color</label>
+          <div class="colors" id="colorChoices"></div>
+          <div class="tiny">Your color is used on the map and the left side of the progress bar.</div>
+        </div>
+      </div>
+
+      <div class="modalActions">
+        <button id="startBtn" class="primary" type="button">Start</button>
+      </div>
+
+      <div class="tiny">
+        Easter eggs: try <b>Puerto Rico</b> or <b>Greenland</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="hud">
+        <div class="metric"><div class="label">Your EV</div><div class="value" id="scoreText">0</div></div>
+        <div class="metric"><div class="label">PC EV</div><div class="value" id="pcScoreText">0</div></div>
+        <div class="metric"><div class="label">Claimed</div><div class="value" id="countText">0</div></div>
+        <div class="metric"><div class="label" id="timeLabel">Time</div><div class="value timer" id="timerText">02:00</div></div>
+      </div>
+
+      <div class="controls">
+        <input id="stateInput" type="text" placeholder="Type a full state name" autocomplete="off" disabled />
+        <button class="primary" id="submitBtn" type="button" disabled>Submit</button>
+        <button id="restartBtn" type="button">Restart</button>
+        <button id="switchModeBtn" class="secondary" type="button" style="display:none;">Switch Mode</button>
+      </div>
+
+      <div class="progressWrap">
+        <div class="progressTop">
+          <div class="title">Progress</div>
+          <div style="color:var(--muted); font-size:13px;">0 → 540</div>
+        </div>
+        <div class="bar">
+          <div class="tickLabel" aria-hidden="true">270</div>
+          <div class="tick" aria-hidden="true"></div>
+          <div class="fillPC" id="progressFillPC"></div>
+          <div class="fillPlayer" id="progressFillPlayer"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:6px; color:var(--muted); font-size:12px;">
+          <span id="progressLeft">0</span>
+          <span id="progressRight">0</span>
+        </div>
+      </div>
+
+      <div class="winBanner" id="winBanner">
+        <div id="winText">🏆 Result</div>
+        <div class="sub" id="winSub">...</div>
+      </div>
+
+      <div class="msg info" id="message"></div>
+
+      <div class="lockPanel" id="lockPanel" style="display:none;">
+        <div class="title">
+          <span>Competitive Mode: Locked States</span>
+          <span style="color:var(--muted); font-size:12px;">
+            Round <span id="roundText">1</span>/17 · <span id="roundCountdown">20</span>s left
+          </span>
+        </div>
+        <div class="subtitle">You can only answer using one of the three states highlighted on the map.</div>
+        <div class="lockedList" id="lockedList"></div>
+      </div>
+    </div>
+
+    <div class="layout">
+      <div class="card mapCard">
+        <svg id="map" viewBox="0 0 975 610" aria-label="US map"></svg>
+        <div class="legend">
+          <span class="chip"><span class="dot un"></span> unclaimed</span>
+          <span class="chip"><span class="dot hit"></span> you</span>
+          <span class="chip"><span class="dot pc"></span> PC</span>
+          <span class="chip"><span class="dot out"></span> missed</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap;">
+          <div style="font-weight:950; font-size:18px;">Claimed States</div>
+          <div style="color:var(--muted); font-size:13px;">(Full names only)</div>
+        </div>
+        <div class="chips" id="claimedList"></div>
+        <hr style="border:none; border-top:1px solid #e5e7eb; margin:14px 0;">
+        <div style="color:var(--muted); font-size:12px; line-height:1.4;">
+          <ul style="margin:0 0 0 18px;">
+            <li>Full names only (no abbreviations).</li>
+            <li>No auto-correction. If it looks close, you’ll see “possible typo”.</li>
+            <li>Competitive mode: you may only answer from the 3 locked states each round.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tooltip" id="tooltip"></div>
+
+<script>
+(() => {
+  // ------------------ Data ------------------
+  const EV_BY_ABBR = {
+    AL:9, AK:3, AZ:11, AR:6, CA:54, CO:10, CT:7, DE:3, FL:30, GA:16,
+    HI:4, ID:4, IL:19, IN:11, IA:6, KS:6, KY:8, LA:8, ME:4, MD:10,
+    MA:11, MI:15, MN:10, MS:6, MO:10, MT:4, NE:5, NV:6, NH:4, NJ:14,
+    NM:5, NY:28, NC:16, ND:3, OH:17, OK:7, OR:8, PA:19, RI:4, SC:9,
+    SD:3, TN:11, TX:40, UT:6, VT:3, VA:13, WA:12, WV:4, WI:10, WY:3,
+    DC:3
+  };
+
+  const NAME_BY_ABBR = {
+    AL:"Alabama", AK:"Alaska", AZ:"Arizona", AR:"Arkansas", CA:"California", CO:"Colorado", CT:"Connecticut",
+    DE:"Delaware", FL:"Florida", GA:"Georgia", HI:"Hawaii", ID:"Idaho", IL:"Illinois", IN:"Indiana", IA:"Iowa",
+    KS:"Kansas", KY:"Kentucky", LA:"Louisiana", ME:"Maine", MD:"Maryland", MA:"Massachusetts", MI:"Michigan",
+    MN:"Minnesota", MS:"Mississippi", MO:"Missouri", MT:"Montana", NE:"Nebraska", NV:"Nevada", NH:"New Hampshire",
+    NJ:"New Jersey", NM:"New Mexico", NY:"New York", NC:"North Carolina", ND:"North Dakota", OH:"Ohio",
+    OK:"Oklahoma", OR:"Oregon", PA:"Pennsylvania", RI:"Rhode Island", SC:"South Carolina", SD:"South Dakota",
+    TN:"Tennessee", TX:"Texas", UT:"Utah", VT:"Vermont", VA:"Virginia", WA:"Washington", WV:"West Virginia",
+    WI:"Wisconsin", WY:"Wyoming", DC:"District of Columbia"
+  };
+
+  const FIPS_TO_ABBR = {
+    1:"AL", 2:"AK", 4:"AZ", 5:"AR", 6:"CA", 8:"CO", 9:"CT", 10:"DE", 11:"DC", 12:"FL", 13:"GA",
+    15:"HI", 16:"ID", 17:"IL", 18:"IN", 19:"IA", 20:"KS", 21:"KY", 22:"LA", 23:"ME", 24:"MD",
+    25:"MA", 26:"MI", 27:"MN", 28:"MS", 29:"MO", 30:"MT", 31:"NE", 32:"NV", 33:"NH", 34:"NJ",
+    35:"NM", 36:"NY", 37:"NC", 38:"ND", 39:"OH", 40:"OK", 41:"OR", 42:"PA", 44:"RI", 45:"SC",
+    46:"SD", 47:"TN", 48:"TX", 49:"UT", 50:"VT", 51:"VA", 53:"WA", 54:"WV", 55:"WI", 56:"WY"
+  };
+
+  const TERRITORIES = new Set([
+    "puerto rico","guam","u s virgin islands","us virgin islands","united states virgin islands",
+    "american samoa","northern mariana islands","commonwealth of the northern mariana islands"
+  ]);
+  const NON_US = new Set(["canada","greenland","venezuela","panama"]);
+
+  // ------------------ Settings ------------------
+  const PROGRESS_MAX = 540;
+  const WIN_THRESHOLD = 270;
+
+  const NORMAL_TIME_SEC = 120;
+
+  const COMP_ROUNDS = 17;
+  const COMP_ROUND_SEC = 20;
+
+  // ------------------ DOM ------------------
+  const startOverlay = document.getElementById("startOverlay");
+  const fullNameEl = document.getElementById("fullName");
+  const partyNameEl = document.getElementById("partyName");
+  const modeChoicesEl = document.getElementById("modeChoices");
+  const colorChoicesEl = document.getElementById("colorChoices");
+  const startBtn = document.getElementById("startBtn");
+
+  const scoreText = document.getElementById("scoreText");
+  const pcScoreText = document.getElementById("pcScoreText");
+  const countText = document.getElementById("countText");
+  const timerText = document.getElementById("timerText");
+  const timeLabel = document.getElementById("timeLabel");
+
+  const messageEl = document.getElementById("message");
+  const inputEl = document.getElementById("stateInput");
+  const submitBtn = document.getElementById("submitBtn");
+  const restartBtn = document.getElementById("restartBtn");
+  const switchModeBtn = document.getElementById("switchModeBtn");
+  const tooltip = document.getElementById("tooltip");
+
+  const progressFillPlayer = document.getElementById("progressFillPlayer");
+  const progressFillPC = document.getElementById("progressFillPC");
+  const progressLeft = document.getElementById("progressLeft");
+  const progressRight = document.getElementById("progressRight");
+
+  const winBanner = document.getElementById("winBanner");
+  const winText = document.getElementById("winText");
+  const winSub = document.getElementById("winSub");
+
+  const lockPanel = document.getElementById("lockPanel");
+  const lockedList = document.getElementById("lockedList");
+  const roundText = document.getElementById("roundText");
+  const roundCountdown = document.getElementById("roundCountdown");
+
+  const claimedList = document.getElementById("claimedList");
+
+  // ------------------ State ------------------
+  let mode = "normal";
+
+  let yourName = "";
+  let yourParty = "";
+  let yourColor = "#2563eb";
+
+  function computePcColor(playerColor){
+    const c = (playerColor || "").toLowerCase();
+    return (c === "#f97316") ? "#7c3aed" : "#f97316"; // if player orange => PC purple
+  }
+
+  let timerId = null;
+
+  let ended = false;
+  let winShown = false;
+  let loseShown = false;
+
+  let yourEV = 0;
+  let pcEV = 0;
+
+  const yourStates = new Set();
+  const pcStates = new Set();
+
+  // Normal mode timer
+  let normalTimeLeft = NORMAL_TIME_SEC;
+
+  // Competitive mode round timer
+  let roundIndex = 0;          // 0..16
+  let roundTimeLeft = COMP_ROUND_SEC;
+
+  // Locked set for current round
+  let lockedOrder = [];        // exactly 3 slots (or fewer if game ends)
+  // slot states: { abbr, status: "locked"|"player"|"pc" }
+  let lockedSlots = [];
+
+  const pathByAbbr = new Map();
+
+  // ------------------ Lookups ------------------
+  const NAME_TO_ABBR = new Map();
+  for (const [abbr, name] of Object.entries(NAME_BY_ABBR)) NAME_TO_ABBR.set(normalize(name), abbr);
+
+  const DC_VARIANTS = new Map([
+    ["district of columbia","DC"],
+    ["washington dc","DC"],
+    ["washington d c","DC"],
+    ["washington, dc","DC"],
+    ["washington, d c","DC"]
+  ]);
+
+  // ------------------ UI: mode choices ------------------
+  function renderModeChoices(){
+    modeChoicesEl.innerHTML = "";
+    const modes = [
+      { key:"normal", title:"Normal Mode", desc:"Free typing. Claim any unclaimed state at any time. 2:00 total." },
+      { key:"competitive", title:"Competitive Mode", desc:"17 rounds. Each round locks 3 states for 20 seconds. You can only answer from those 3." }
+    ];
+    modes.forEach((m) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "modeBtn" + (m.key === "normal" ? " selected" : "");
+      btn.dataset.mode = m.key;
+      btn.innerHTML = `<div class="t">${m.title}</div><div class="d">${m.desc}</div>`;
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        [...modeChoicesEl.querySelectorAll(".modeBtn")].forEach(b => b.classList.remove("selected"));
+        btn.classList.add("selected");
+        mode = m.key;
+      });
+      modeChoicesEl.appendChild(btn);
+    });
+    mode = "normal";
+  }
+  renderModeChoices();
+
+  // ------------------ UI: color choices ------------------
+  const PARTY_COLORS = [
+    { name:"Blue", value:"#2563eb" },
+    { name:"Red", value:"#dc2626" },
+    { name:"Green", value:"#16a34a" },
+    { name:"Purple", value:"#7c3aed" },
+    { name:"Orange", value:"#f97316" },
+    { name:"Teal", value:"#0d9488" }
+  ];
+
+  function renderColorChoices(){
+    colorChoicesEl.innerHTML = "";
+    PARTY_COLORS.forEach((c, idx) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "colorBtn" + (idx === 0 ? " selected" : "");
+      btn.dataset.color = c.value;
+      btn.innerHTML = `<span class="swatch" style="background:${c.value}"></span>${c.name}`;
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        [...colorChoicesEl.querySelectorAll(".colorBtn")].forEach(b => b.classList.remove("selected"));
+        btn.classList.add("selected");
+        yourColor = c.value;
+        document.documentElement.style.setProperty("--partyColor", yourColor);
+        document.documentElement.style.setProperty("--pcColor", computePcColor(yourColor));
+      });
+      colorChoicesEl.appendChild(btn);
+    });
+
+    yourColor = PARTY_COLORS[0].value;
+    document.documentElement.style.setProperty("--partyColor", yourColor);
+    document.documentElement.style.setProperty("--pcColor", computePcColor(yourColor));
+  }
+  renderColorChoices();
+
+  // ------------------ helpers ------------------
+  function normalize(s){
+    return String(s || "")
+      .toLowerCase()
+      .trim()
+      .replace(/[\u2019']/g, "")
+      .replace(/[^a-z\s,.-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function formatTime(sec){
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  }
+
+  function setMessage(text, kind="info"){
+    messageEl.className = `msg ${kind}`;
+    messageEl.textContent = text;
+  }
+
+  function applyColors(){
+    const selColor = colorChoicesEl.querySelector(".colorBtn.selected")?.dataset?.color;
+    if (selColor) yourColor = selColor;
+    const selMode = modeChoicesEl.querySelector(".modeBtn.selected")?.dataset?.mode;
+    if (selMode) mode = selMode;
+
+    document.documentElement.style.setProperty("--partyColor", yourColor);
+    document.documentElement.style.setProperty("--pcColor", computePcColor(yourColor));
+  }
+
+  function updateTimeDisplay(){
+    if (mode === "normal") {
+      timeLabel.textContent = "Time";
+      timerText.textContent = formatTime(normalTimeLeft);
+      timerText.classList.add("timer");
+    } else {
+      // Competitive: NO 5:40 global timer; show per-round seconds only.
+      timeLabel.textContent = "Round";
+      timerText.textContent = `${roundTimeLeft}s`;
+      timerText.classList.add("timer");
+    }
+  }
+
+  function updateProgress(){
+    const clampedPlayer = Math.max(0, Math.min(PROGRESS_MAX, yourEV));
+    const clampedPC = Math.max(0, Math.min(PROGRESS_MAX, pcEV));
+    progressFillPlayer.style.width = `${(clampedPlayer / PROGRESS_MAX) * 100}%`;
+    progressFillPC.style.width = `${(clampedPC / PROGRESS_MAX) * 100}%`;
+    progressLeft.textContent = `${yourEV}`;
+    progressRight.textContent = `${pcEV}`;
+  }
+
+  function updateHUD(){
+    scoreText.textContent = `${yourEV}`;
+    pcScoreText.textContent = `${pcEV}`;
+    countText.textContent = `${yourStates.size + pcStates.size}`;
+
+    updateTimeDisplay();
+    updateProgress();
+
+    if (!ended) {
+      if (yourEV >= WIN_THRESHOLD && !winShown) {
+        winShown = true;
+        winBanner.style.display = "block";
+        winText.innerHTML = `🏆 <span class="pill">270+ reached</span> Congratulations!`;
+        winSub.textContent = `Congratulations — ${yourParty} candidate ${yourName} is elected President of the United States. (You can keep playing.)`;
+      }
+      if (mode === "competitive" && pcEV >= WIN_THRESHOLD && !loseShown) {
+        loseShown = true;
+        winBanner.style.display = "block";
+        winText.innerHTML = `💥 <span class="pill">PC reached 270</span> You lose.`;
+        winSub.textContent = `The PC reached 270 electoral votes first. Try again with a faster strategy.`;
+        endGame("lose");
+        return;
+      }
+    }
+  }
+
+  function addClaimChip(owner, abbr){
+    const chip = document.createElement("span");
+    chip.className = "chipState" + (owner === "pc" ? " pc" : "");
+    chip.textContent = `${NAME_BY_ABBR[abbr]} • ${EV_BY_ABBR[abbr]}` + (owner === "pc" ? " (PC)" : "");
+    claimedList.appendChild(chip);
+  }
+
+  function setStateOwner(abbr, owner){
+    const p = pathByAbbr.get(abbr);
+    if (!p) return;
+    p.classList.remove("player","pc","locked");
+    if (owner === "player") p.classList.add("player");
+    if (owner === "pc") p.classList.add("pc");
+  }
+
+  // ------------------ Competitive: locked UI behavior ------------------
+  function clearLocksOnMap(){
+    lockedSlots.forEach(slot => {
+      const p = pathByAbbr.get(slot.abbr);
+      if (p) p.classList.remove("locked");
+    });
+  }
+
+  function renderLockedSlots(){
+    lockedList.innerHTML = "";
+    lockedSlots.forEach((slot, idx) => {
+      const chip = document.createElement("span");
+      chip.className = "lockedChip pc";
+      if (slot.status === "locked") {
+        chip.textContent = "LOCKED";
+      } else if (slot.status === "player") {
+        chip.classList.add("revealed");
+        chip.textContent = NAME_BY_ABBR[slot.abbr];
+      } else if (slot.status === "pc") {
+        // keep PC wins anonymous (optional), but we can show "PC" or keep as "LOCKED"
+        // requirement only specified player answer reveals to state name
+        chip.textContent = "LOCKED";
+      }
+      lockedList.appendChild(chip);
+    });
+  }
+
+  function allThreeAnsweredByPlayer(){
+    return lockedSlots.length > 0 && lockedSlots.every(s => s.status === "player");
+  }
+
+  function lockStatesForRound(){
+    clearLocksOnMap();
+
+    // pick 3 unclaimed
+    const available = [];
+    for (const abbr of Object.keys(NAME_BY_ABBR)) {
+      if (yourStates.has(abbr) || pcStates.has(abbr)) continue;
+      available.push(abbr);
+    }
+
+    // shuffle
+    for (let i = available.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [available[i], available[j]] = [available[j], available[i]];
+    }
+
+    lockedOrder = available.slice(0, Math.min(3, available.length));
+    lockedSlots = lockedOrder.map(abbr => ({ abbr, status:"locked" }));
+
+    // highlight on map
+    lockedOrder.forEach(abbr => {
+      const p = pathByAbbr.get(abbr);
+      if (p) p.classList.add("locked");
+    });
+
+    renderLockedSlots();
+  }
+
+  // End-of-round: PC claims any still-locked states
+  function pcClaimsRemainingLocked(){
+    for (const slot of lockedSlots) {
+      if (slot.status !== "locked") continue;
+      if (yourStates.has(slot.abbr) || pcStates.has(slot.abbr)) { slot.status = "pc"; continue; }
+      pcStates.add(slot.abbr);
+      pcEV += EV_BY_ABBR[slot.abbr];
+      setStateOwner(slot.abbr, "pc");
+      addClaimChip("pc", slot.abbr);
+      slot.status = "pc";
+    }
+  }
+
+  function startNextRound(){
+    // if game already ended or no more rounds, stop
+    if (ended) return;
+
+    roundIndex += 1;
+    if (roundIndex >= COMP_ROUNDS) {
+      endGame("end");
+      return;
+    }
+
+    roundText.textContent = String(roundIndex + 1);
+    roundTimeLeft = COMP_ROUND_SEC;
+    roundCountdown.textContent = String(roundTimeLeft);
+
+    lockStatesForRound();
+    updateHUD();
+  }
+
+  function markMissedStates(){
+    for (const [abbr, p] of pathByAbbr.entries()){
+      if (!yourStates.has(abbr) && !pcStates.has(abbr)) p.classList.add("missed");
+      p.classList.remove("locked");
+    }
+  }
+
+  // ------------------ Reset ------------------
+  function resetForMode(){
+    ended = false;
+    winShown = false;
+    loseShown = false;
+
+    yourEV = 0;
+    pcEV = 0;
+    yourStates.clear();
+    pcStates.clear();
+
+    claimedList.innerHTML = "";
+    inputEl.value = "";
+
+    for (const p of pathByAbbr.values()){
+      p.classList.remove("player","pc","locked","missed");
+    }
+
+    winBanner.style.display = "none";
+    switchModeBtn.style.display = "none";
+
+    clearInterval(timerId);
+    timerId = null;
+
+    if (mode === "normal") {
+      lockPanel.style.display = "none";
+      normalTimeLeft = NORMAL_TIME_SEC;
+      setMessage("Normal Mode: Type a FULL state name.", "info");
+    } else {
+      lockPanel.style.display = "block";
+      roundIndex = 0;
+      roundText.textContent = "1";
+      roundTimeLeft = COMP_ROUND_SEC;
+      roundCountdown.textContent = String(roundTimeLeft);
+      lockStatesForRound();
+      setMessage("Competitive Mode: You may ONLY answer using one of the 3 locked states highlighted on the map.", "info");
+    }
+
+    updateHUD();
+  }
+
+  function startTimers(){
+    clearInterval(timerId);
+    timerId = setInterval(() => {
+      if (ended) return;
+
+      if (mode === "normal") {
+        normalTimeLeft -= 1;
+        if (normalTimeLeft <= 0) {
+          endGame("time");
+          return;
+        }
+      } else {
+        // Competitive: per-round only
+        roundTimeLeft -= 1;
+        roundCountdown.textContent = String(Math.max(0, roundTimeLeft));
+
+        if (roundTimeLeft <= 0) {
+          // round ends -> PC claims remaining locked
+          pcClaimsRemainingLocked();
+          updateHUD(); // may end by PC reaching 270
+
+          if (!ended) startNextRound();
+          return;
+        }
+      }
+
+      updateHUD();
+    }, 1000);
+  }
+
+  function endGame(reason){
+    if (ended) return;
+    ended = true;
+    clearInterval(timerId);
+
+    inputEl.disabled = true;
+    submitBtn.disabled = true;
+
+    switchModeBtn.style.display = "inline-block";
+
+    if (reason === "lose") {
+      setMessage("Game over: the PC reached 270 first.", "bad");
+      return;
+    }
+
+    if (mode === "normal") {
+      markMissedStates();
+      setMessage("Time’s up! Hit Restart to play again.", "bad");
+      return;
+    }
+
+    // Competitive: final comparison
+    markMissedStates();
+    winBanner.style.display = "block";
+    if (yourEV > pcEV) {
+      winText.innerHTML = `🏁 <span class="pill">Match ended</span> You win!`;
+      winSub.textContent = `Final score — You: ${yourEV} EV · PC: ${pcEV} EV.`;
+    } else if (yourEV < pcEV) {
+      winText.innerHTML = `🏁 <span class="pill">Match ended</span> You lose.`;
+      winSub.textContent = `Final score — You: ${yourEV} EV · PC: ${pcEV} EV.`;
+    } else {
+      winText.innerHTML = `🏁 <span class="pill">Match ended</span> Tie.`;
+      winSub.textContent = `Final score — You: ${yourEV} EV · PC: ${pcEV} EV.`;
+    }
+  }
+
+  // ------------------ Parsing + typo hint ------------------
+  function abbrFromFullNameOnly(raw){
+    const n = normalize(raw);
+    if (!n) return null;
+    const compact = n.replace(/\s+/g,"");
+    if (/^[a-z]{2}$/.test(compact)) return "__ABBR_REJECTED__";
+
+    if (DC_VARIANTS.has(n)) return DC_VARIANTS.get(n);
+    if (NAME_TO_ABBR.has(n)) return NAME_TO_ABBR.get(n);
+
+    for (const [key, abbr] of NAME_TO_ABBR.entries()){
+      if (key.replace(/\s+/g,"") === compact) return abbr;
+    }
+    return null;
+  }
+
+  function levenshtein(a,b){
+    if (a===b) return 0;
+    const m=a.length,n=b.length;
+    if (m===0) return n;
+    if (n===0) return m;
+    const dp=Array.from({length:m+1},()=>new Array(n+1).fill(0));
+    for (let i=0;i<=m;i++) dp[i][0]=i;
+    for (let j=0;j<=n;j++) dp[0][j]=j;
+    for (let i=1;i<=m;i++){
+      for (let j=1;j<=n;j++){
+        const cost=a[i-1]===b[j-1]?0:1;
+        dp[i][j]=Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+cost);
+      }
+    }
+    return dp[m][n];
+  }
+
+  function looksLikeTypo(normInput){
+    if (!normInput) return false;
+    let bestDist=Infinity, bestLen=0;
+    for (const name of Object.values(NAME_BY_ABBR)){
+      const dn=normalize(name);
+      const d=levenshtein(normInput,dn);
+      if (d<bestDist){ bestDist=d; bestLen=dn.length; }
+    }
+    const maxHintDist=Math.max(1,Math.floor(bestLen*0.22));
+    return bestDist<=maxHintDist;
+  }
+
+  function handleEasterEgg(n){
+    const s=n.replace(/\s+/g," ").trim();
+    if (TERRITORIES.has(s)) {
+      setMessage("ℹ️ That is a U.S. territory, not a state — it does not have electoral votes in presidential elections.", "info");
+      return true;
+    }
+    if (NON_US.has(s)) {
+      setMessage("ℹ️ Despite some surprising statements from the current administration, that place is not part of the United States at this time.", "info");
+      return true;
+    }
+    return false;
+  }
+
+  // ------------------ Submit ------------------
+  function submit(){
+    if (ended) return;
+
+    const raw = inputEl.value;
+    const n = normalize(raw);
+    if (!n) return;
+
+    const abbr = abbrFromFullNameOnly(raw);
+
+    if (abbr === "__ABBR_REJECTED__") {
+      setMessage("❌ Abbreviations are disabled. Please type the full state name.", "bad");
+      return;
+    }
+
+    if (!abbr) {
+      if (handleEasterEgg(n)) { inputEl.value=""; return; }
+      if (looksLikeTypo(n)) setMessage("❌ Not recognized — possible typo. (No auto-correction enabled.)", "bad");
+      else setMessage("❌ Not recognized. Type a full state name.", "bad");
+      return;
+    }
+
+    if (yourStates.has(abbr)) {
+      setMessage("⚠️ You already claimed that state.", "info");
+      inputEl.value=""; return;
+    }
+    if (pcStates.has(abbr)) {
+      setMessage("⚠️ Too late — the PC already claimed that state.", "bad");
+      inputEl.value=""; return;
+    }
+
+    if (mode === "competitive") {
+      // only from locked states that are still "locked" (player can’t answer already revealed ones)
+      const slot = lockedSlots.find(s => s.abbr === abbr);
+      if (!slot) {
+        setMessage("❌ Competitive Mode: you can only answer using one of the 3 locked states highlighted on the map.", "bad");
+        return;
+      }
+      if (slot.status !== "locked") {
+        setMessage("⚠️ That locked slot is already resolved.", "info");
+        inputEl.value=""; return;
+      }
+
+      // claim it
+      yourStates.add(abbr);
+      yourEV += EV_BY_ABBR[abbr];
+      setStateOwner(abbr, "player");
+      addClaimChip("player", abbr);
+
+      // reveal chip: LOCKED -> state name, and style becomes player-color background with white text
+      slot.status = "player";
+      const p = pathByAbbr.get(abbr);
+      if (p) p.classList.remove("locked");
+      renderLockedSlots();
+
+      updateHUD();
+
+      // if all 3 answered by player, go to next round immediately
+      if (allThreeAnsweredByPlayer()) {
+        // PC gets nothing this round
+        startNextRound();
+        setMessage("✅ Perfect round — moving to the next lock.", "ok");
+      } else {
+        setMessage("✅ Claimed.", "ok");
+      }
+
+      inputEl.value="";
+      return;
+    }
+
+    // Normal mode claim
+    yourStates.add(abbr);
+    yourEV += EV_BY_ABBR[abbr];
+    setStateOwner(abbr, "player");
+    addClaimChip("player", abbr);
+
+    updateHUD();
+    setMessage(yourEV >= WIN_THRESHOLD ? "✅ Claimed. 270+ reached — keep going!" : "✅ Claimed.", "ok");
+    inputEl.value="";
+
+    const totalClaimed = yourStates.size + pcStates.size;
+    if (totalClaimed === Object.keys(NAME_BY_ABBR).length) endGame("end");
+  }
+
+  // ------------------ Map ------------------
+  async function initMap(){
+    const topo = await fetch("https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json").then(r => r.json());
+    const svg = d3.select("#map");
+    const features = topojson.feature(topo, topo.objects.states).features;
+
+    const projection = d3.geoAlbersUsa().fitSize([975,610], {type:"FeatureCollection", features});
+    const path = d3.geoPath(projection);
+
+    svg.selectAll("path")
+      .data(features)
+      .join("path")
+      .attr("class","state")
+      .attr("d", path)
+      .each(function(d){
+        const idNum = typeof d.id === "string" ? parseInt(d.id,10) : d.id;
+        const abbr = FIPS_TO_ABBR[idNum];
+        if (!abbr) return;
+        pathByAbbr.set(abbr, this);
+        this.dataset.abbr = abbr;
+        this.dataset.name = NAME_BY_ABBR[abbr];
+        this.dataset.ev = EV_BY_ABBR[abbr];
+      })
+      .on("mousemove", function(event){
+        const abbr = this.dataset.abbr;
+        if (!abbr) return;
+        const status = yourStates.has(abbr) ? "yours" : (pcStates.has(abbr) ? "PC" : (ended ? "missed" : "unclaimed"));
+        tooltip.innerHTML = `<b>${this.dataset.name}</b><br/>EV: <b>${this.dataset.ev}</b><br/><span style="opacity:.85">Status: ${status}</span>`;
+        tooltip.style.left = event.clientX + "px";
+        tooltip.style.top = event.clientY + "px";
+        tooltip.style.opacity = 1;
+      })
+      .on("mouseleave", () => { tooltip.style.opacity = 0; });
+
+    setMessage("Set up your candidate to start.", "info");
+  }
+
+  // ------------------ Start / Restart / Switch Mode ------------------
+  function startGame(){
+    yourName = (fullNameEl.value || "").trim() || "Candidate";
+    yourParty = (partyNameEl.value || "").trim() || "Your Party";
+
+    applyColors();
+
+    inputEl.disabled = false;
+    submitBtn.disabled = false;
+    startOverlay.style.display = "none";
+
+    resetForMode();
+    startTimers();
+    inputEl.focus();
+  }
+
+  function openSetupOverlay(){
+    clearInterval(timerId);
+    ended = true;
+    inputEl.disabled = true;
+    submitBtn.disabled = true;
+    startOverlay.style.display = "flex";
+  }
+
+  restartBtn.addEventListener("click", () => {
+    if (startOverlay.style.display !== "none") return;
+    resetForMode();
+    startTimers();
+    inputEl.disabled = false;
+    submitBtn.disabled = false;
+    inputEl.focus();
+  });
+
+  switchModeBtn.addEventListener("click", () => {
+    openSetupOverlay();
+    const next = (mode === "normal") ? "competitive" : "normal";
+    [...modeChoicesEl.querySelectorAll(".modeBtn")].forEach(b => {
+      b.classList.toggle("selected", b.dataset.mode === next);
+    });
+    mode = next;
+  });
+
+  submitBtn.addEventListener("click", submit);
+  inputEl.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+  startBtn.addEventListener("click", startGame);
+
+  // ------------------ init ------------------
+  initMap().catch(err => {
+    console.error(err);
+    alert("Failed to load map data. Please check your internet connection.");
+  });
+})();
+</script>
+</body>
+</html>
